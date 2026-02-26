@@ -29,8 +29,7 @@ def build_messages(user_prompt):
     return [types.Content(role="user", parts=[types.Part(text=user_prompt)])]
 
 #Send the messages to Gemnini and return the response
-def generate_response(api_key, messages):
-    client = genai.Client(api_key=api_key)
+def generate_response(client, messages):
     response = client.models.generate_content(
         model="gemini-2.5-flash",
         contents=messages,
@@ -74,18 +73,46 @@ def handle_function_calls(response, verbose=False):
 def main():
     args = parse_args()
     api_key = load_api_key()
+    client = genai.Client(api_key=api_key)
     messages = build_messages(args.user_prompt)
-    response = generate_response(api_key, messages)
 
     if args.verbose:
         print(f"User prompt: {args.user_prompt}")
-        print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
-        print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
+    
+    for iteration in range(20):
+        response = generate_response(client, messages)
 
-    function_results = handle_function_calls(response, verbose=args.verbose)
+        if args.verbose:
+            print(f"\n--- Iteration {iteration + 1} ---")
+            print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
+            print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
 
-    if not function_results:
-        print(response.text)
+        #Append model candidates to conversation history
+        if response.candidates:
+            for candidate in response.candidates:
+                if candidate.content:
+                    messages.append(candidate.content)
+        
+        function_results = handle_function_calls(response, verbose=args.verbose)
+
+        if not function_results:
+            print(response.text)
+            break
+        
+        #Append tool results to conversation
+        messages.append(
+            types.Content(
+                role="user",
+                parts=function_results
+            )
+        )  
+
+    else:
+        print("Max iterations (20) reached without a final response.")
+        exit(1)
+
+
+
     
 if __name__ == "__main__":
     main()
